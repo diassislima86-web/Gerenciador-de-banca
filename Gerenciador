@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gerenciador de Banca (Risco Dinâmico)</title>
+    <!-- Carregamento do Tailwind CSS para estilização -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Carregamento do Chart.js para o Gráfico -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --color-primary: #10b981; /* Emerald 500 (vitória) */
+            --color-secondary: #f43f5e; /* Rose 500 (derrota) */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .card {
+            background-color: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        .btn-win {
+            background-color: var(--color-primary);
+            transition: all 0.15s;
+        }
+        .btn-win:hover {
+            background-color: #059669; /* Emerald 600 */
+            transform: translateY(-1px);
+        }
+        .btn-loss {
+            background-color: var(--color-secondary);
+            transition: all 0.15s;
+        }
+        .btn-loss:hover {
+            background-color: #e11d48; /* Rose 600 */
+            transform: translateY(-1px);
+        }
+        /* CLASSE PARA DESTAQUE DE ERRO */
+        .error-highlight {
+            border-color: var(--color-secondary) !important; 
+            box-shadow: 0 0 0 3px rgba(244, 63, 94, 0.5) !important;
+        }
+        #bankrollChartContainer {
+            position: relative;
+            height: 40vh; /* Altura responsiva */
+            width: 100%;
+        }
+        .llm-loading {
+            position: relative;
+            pointer-events: none;
+            opacity: 0.8;
+        }
+        .llm-loading::after {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #fff;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s ease-in-out infinite;
+            margin-left: -8px;
+            margin-top: -8px;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8">
+
+    <div id="app" class="max-w-6xl mx-auto space-y-8">
+        <header class="text-center p-6 card">
+            <h1 class="text-3xl font-extrabold text-gray-800">📊 Gerenciamento Financeiro (Customizável)</h1>
+            <p class="text-gray-500 mt-1">Seu risco e retorno são calculados pela Banca Atual e podem ser configurados abaixo.</p>
+        </header>
+
+        <!-- Seção de Configurações de Risco -->
+        <div class="p-6 card border-l-4 border-indigo-500">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">⚙️ Configurações de Risco</h2>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label for="riskPercentageInput" class="block text-sm font-medium text-gray-700">Risco Máximo da Banca (%)</label>
+                    <div class="relative mt-1 rounded-md shadow-sm">
+                        <input type="number" id="riskPercentageInput" min="0.1" step="0.1"
+                                class="block w-full rounded-md border-gray-300 pr-10 focus:border-indigo-500 focus:ring-indigo-500"
+                                onchange="updateSettings('riskPercentage', this.value)" oninput="updateSettings('riskPercentage', this.value)">
+                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                            <span class="text-gray-500">%</span>
+                        </div>
+                    </div>
+                    <p class="mt-1 text-xs text-gray-500">Limite máximo de perda por ciclo de risco (ex: 5 para 5%).</p>
+                </div>
+                <div>
+                    <label for="returnPercentageInput" class="block text-sm font-medium text-gray-700">Retorno da Operação (Pay-out %)</label>
+                    <div class="relative mt-1 rounded-md shadow-sm">
+                        <input type="number" id="returnPercentageInput" min="0.1" step="0.1"
+                                class="block w-full rounded-md border-gray-300 pr-10 focus:border-indigo-500 focus:ring-indigo-500"
+                                onchange="updateSettings('returnPercentage', this.value)" oninput="updateSettings('returnPercentage', this.value)">
+                        <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                            <span class="text-gray-500">%</span>
+                        </div>
+                    </div>
+                     <p class="mt-1 text-xs text-gray-500">Porcentagem de retorno sobre o valor investido (ex: 87 para 87%).</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Seção de Dados Chave e Regra de Risco / 3 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <!-- 1. Banca Inicial (Input) -->
+            <div class="p-5 card border-l-4 border-gray-400">
+                <label for="initialBankrollInput" class="block text-sm font-medium text-gray-500">Banca Inicial (R$)</label>
+                <input type="number" id="initialBankrollInput" placeholder="Ex: 1000.00"
+                       class="mt-1 block w-full text-xl font-semibold border-none focus:ring-0 p-0 text-gray-700"
+                       onchange="updateInitialBankroll(this.value)" oninput="updateInitialBankroll(this.value)">
+            </div>
+
+            <!-- 2. Banca Atual (Display) -->
+            <div class="p-5 card border-l-4 border-green-500">
+                <p class="text-sm font-medium text-gray-500">Banca Atual (Saldo)</p>
+                <p id="currentBankrollDisplay" class="mt-1 text-2xl font-bold text-green-600">R$ 0,00</p>
+            </div>
+
+            <!-- 3. Risco Máximo Total (Calculado DINÂMICO) -->
+            <div class="p-5 card border-l-4 border-red-500">
+                <p class="text-sm font-medium text-gray-500">Risco Máximo Total (<span id="riskPercentLabel">5%</span> da Atual)</p>
+                <p id="maxRiskTotalDisplay" class="mt-1 text-2xl font-bold text-red-600">R$ 0,00</p>
+            </div>
+
+            <!-- 4. Valor da Unidade (Calculado Risco / 3 DINÂMICO) -->
+            <div class="p-5 card border-l-4 border-orange-500">
+                <p class="text-sm font-medium text-gray-500">Valor da Unidade (Risco / 3)</p>
+                <p id="unitStakeDisplay" class="mt-1 text-2xl font-bold text-orange-600">R$ 0,00</p>
+            </div>
+        </div>
+
+        <!-- Métricas de Desempenho -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <!-- 5. Total de Vitórias -->
+            <div class="p-5 card border-l-4 border-green-700 text-center">
+                <p class="text-sm font-medium text-gray-500">Vitórias (W)</p>
+                <p id="winCountDisplay" class="mt-1 text-3xl font-bold text-green-700">0</p>
+            </div>
+             <!-- 6. Total de Derrotas -->
+            <div class="p-5 card border-l-4 border-red-700 text-center">
+                <p class="text-sm font-medium text-gray-500">Derrotas (L)</p>
+                <p id="lossCountDisplay" class="mt-1 text-3xl font-bold text-red-700">0</p>
+            </div>
+             <!-- 7. Taxa de Acerto (Win Rate) -->
+            <div class="p-5 card border-l-4 border-blue-500 text-center">
+                <p class="text-sm font-medium text-gray-500">Taxa de Acerto (W%)</p>
+                <p id="winRateDisplay" class="mt-1 text-3xl font-bold text-blue-600">0.00%</p>
+            </div>
+        </div>
+
+        <!-- Gráfico de Crescimento da Banca -->
+        <div class="p-6 card">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">📈 Evolução da Banca</h2>
+            <div id="bankrollChartContainer">
+                <canvas id="bankrollChart"></canvas>
+            </div>
+        </div>
+        
+        <!-- Seção de Registro Rápido (Vitória/Derrota) -->
+        <div class="p-6 card">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">⚡ Registro Rápido (Valores Dinâmicos)</h2>
+            <p class="text-sm text-gray-600 mb-4">
+                As transações usam o **Valor da Unidade** e a taxa de retorno de <span id="returnPercentLabel" class="font-bold text-green-600">87%</span>.
+            </p>
+            <div class="flex flex-col sm:flex-row gap-4">
+                <button onclick="registerAutoTransaction(true)" 
+                        class="btn-win text-white font-medium py-3 px-6 rounded-lg shadow-md hover:shadow-lg w-full">
+                    ✅ Registrar Vitória
+                </button>
+                <button onclick="registerAutoTransaction(false)" 
+                        class="btn-loss text-white font-medium py-3 px-6 rounded-lg shadow-md hover:shadow-lg w-full">
+                    ❌ Registrar Derrota
+                </button>
+            </div>
+        </div>
+
+        <!-- Tabela de Histórico de Transações -->
+        <div class="p-6 card overflow-x-auto">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">🧾 Histórico de Transações</h2>
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Data</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Descrição</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Investido (R$)</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Resultado (R$)</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Banca Atual (R$)</th>
+                        <th class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ação</th>
+                    </tr>
+                </thead>
+                <tbody id="transactionList" class="bg-white divide-y divide-gray-200">
+                    <!-- As transações serão inseridas aqui pelo JavaScript -->
+                    <tr>
+                        <td colspan="6" class="py-4 text-center text-gray-500">Nenhuma transação registrada.</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Seção de Adicionar Transação Manual (Aportes/Retiradas) -->
+        <div class="p-6 card">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">✍️ Adicionar Transação Manual (Aportes/Outros)</h2>
+            <div id="llmAnalysisOutput" class="p-3 mb-4 bg-gray-50 border border-gray-200 rounded-lg text-gray-600 hidden">
+                <!-- Output da análise LLM aqui -->
+            </div>
+            <form id="transactionForm" class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div class="col-span-1 md:col-span-2">
+                    <label for="description" class="block text-sm font-medium text-gray-700">Descrição</label>
+                    <input type="text" id="description" required placeholder="Ex: Novo Aporte ou Operação Manual" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500">
+                </div>
+                <div>
+                    <label for="invested" class="block text-sm font-medium text-gray-700">Valor Investido (R$)</label>
+                    <input type="number" id="invested" required min="0" step="0.01" value="0.00" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500">
+                </div>
+                <div>
+                    <label for="result" class="block text-sm font-medium text-gray-700">Resultado (L/P/Aporte em R$)</label>
+                    <input type="number" id="result" required step="0.01" placeholder="Ex: +500.00 (Aporte) ou -25.00 (Saque)" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-emerald-500 focus:ring-emerald-500">
+                </div>
+                
+                <div class="md:col-span-4 flex flex-col sm:flex-row justify-end gap-2 mt-4">
+                    <button type="button" onclick="analyzeRiskWithLLM(event)" id="analyzeButton"
+                            class="bg-indigo-600 text-white font-medium py-2 px-4 rounded-lg shadow-md hover:bg-indigo-700 hover:shadow-lg transition w-full sm:w-auto">
+                        ✨ Análise de Risco LLM
+                    </button>
+                    <button type="submit" class="btn-win text-white font-medium py-2 px-4 rounded-lg shadow-md hover:shadow-lg w-full sm:w-auto">
+                        Registrar Transação Manual
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Firebase Imports e Scripts -->
+    <script type="module">
+        // Importa as funções necessárias do Firebase SDK
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot, updateDoc, arrayRemove, arrayUnion } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Variáveis globais fornecidas pelo ambiente Canvas
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+        // API Key para a API Gemini (deixada em branco para o ambiente Canvas)
+        const apiKey = "" 
+        const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+        let db;
+        let auth;
+        let userId = 'loading';
+        let trackerDocRef;
+        let currentData = {
+            initialBankroll: 0,
+            transactions: [],
+            // NOVOS PARÂMETROS DE CONFIGURAÇÃO:
+            riskPercentage: 5, // Default 5%
+            returnPercentage: 87 // Default 87%
+        };
+        let isAuthReady = false;
+        let bankrollChart; // Variável para a instância do Chart.js
+
+        setLogLevel('Debug');
+
+        // Função para formatar números como moeda brasileira (R$)
+        const formatCurrency = (value) => {
+            if (typeof value !== 'number' || isNaN(value)) return 'R$ 0,00';
+            return new Intl.NumberFormat('pt-BR', {
+                style: 'currency',
+                currency: 'BRL',
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2
+            }).format(value);
+        };
+
+        // Função principal de inicialização do Firebase e autenticação
+        const initFirebase = async () => {
+            if (firebaseConfig) {
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+
+                // Autenticação
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        userId = user.uid;
+                    } else {
+                        // Se não houver usuário, tenta login com token ou anônimo
+                        try {
+                            if (initialAuthToken) {
+                                await signInWithCustomToken(auth, initialAuthToken);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                            userId = auth.currentUser.uid;
+                        } catch (error) {
+                            console.error("Erro ao autenticar no Firebase:", error);
+                            userId = crypto.randomUUID(); // Fallback para ID temporário
+                        }
+                    }
+
+                    // Define a referência do documento APÓS a autenticação
+                    trackerDocRef = doc(db, `artifacts/${appId}/users/${userId}/financial_tracker`, 'main_tracker');
+                    isAuthReady = true;
+                    listenForData();
+                    initChart(); // Inicializa o gráfico
+                });
+            } else {
+                console.error("Configuração do Firebase não encontrada.");
+            }
+        };
+        
+        // Inicializa o Gráfico Chart.js
+        const initChart = () => {
+            // FIX: Destrói o gráfico existente antes de criar um novo, se houver.
+            if (bankrollChart) {
+                bankrollChart.destroy();
+            }
+
+            const ctx = document.getElementById('bankrollChart').getContext('2d');
+            bankrollChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: ['Início'], // Etiqueta inicial
+                    datasets: [{
+                        label: 'Banca Atual (R$)',
+                        data: [0], // Valor inicial
+                        borderColor: '#2563eb', // Azul
+                        backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                        tension: 0.3,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'Valor (R$)'
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    return formatCurrency(value);
+                                }
+                            }
+                        }
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += formatCurrency(context.parsed.y);
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        };
+
+        // Função para escutar as mudanças no Firestore em tempo real
+        const listenForData = () => {
+            if (!isAuthReady) return;
+
+            onSnapshot(trackerDocRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    const data = docSnap.data();
+                    currentData = {
+                        
